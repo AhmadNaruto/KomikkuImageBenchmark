@@ -113,7 +113,10 @@ public:
     const std::string& GetLastError() const override { return last_error_; }
 };
 
-#if !defined(KOMIKKU_HAS_WEBP)
+#if defined(KOMIKKU_HAS_WEBP)
+std::unique_ptr<IDecoder> CreateWebPDecoder();
+std::unique_ptr<IEncoder> CreateWebPEncoder();
+#else
 std::unique_ptr<IDecoder> CreateWebPDecoder() {
     return std::make_unique<StubDecoder>(CodecType::WEBP, "WebP-Stub");
 }
