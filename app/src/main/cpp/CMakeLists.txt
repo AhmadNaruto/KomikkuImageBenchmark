@@ -52,6 +52,37 @@ if (EXISTS "${LIBWEBP_DIR}/CMakeLists.txt")
     list(APPEND EXTRA_LIBS webp webpdemux libwebpmux sharpyuv)
 endif()
 
+# Configure libjxl
+set(LIBJXL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/source/libjxl")
+if (EXISTS "${LIBJXL_DIR}/CMakeLists.txt")
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_SKCMS ON CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_VIEWERS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_FORCE_SYSTEM_BROTLI OFF CACHE BOOL "" FORCE)
+    set(JPEGXL_FORCE_SYSTEM_HWY OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory("${LIBJXL_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/libjxl_build" EXCLUDE_FROM_ALL)
+
+    include_directories("${LIBJXL_DIR}/lib/include")
+    list(APPEND SOURCES
+        decoders/jxl_decoder.cpp
+        encoders/jxl_encoder.cpp
+    )
+    add_definitions(-DKOMIKKU_HAS_JXL)
+    list(APPEND EXTRA_LIBS jxl jxl_cms jxl_threads hwy brotlicommon brotlidec brotlienc)
+endif()
+
 add_library(komikku_benchmark SHARED ${SOURCES})
 
 target_link_libraries(

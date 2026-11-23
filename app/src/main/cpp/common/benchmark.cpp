@@ -125,7 +125,10 @@ std::unique_ptr<IEncoder> CreateWebPEncoder() {
 }
 #endif
 
-#if !defined(KOMIKKU_HAS_JXL)
+#if defined(KOMIKKU_HAS_JXL)
+std::unique_ptr<IDecoder> CreateJxlDecoder();
+std::unique_ptr<IEncoder> CreateJxlEncoder();
+#else
 std::unique_ptr<IDecoder> CreateJxlDecoder() {
     return std::make_unique<StubDecoder>(CodecType::JXL, "JXL-Stub");
 }
