@@ -83,6 +83,29 @@ if (EXISTS "${LIBJXL_DIR}/CMakeLists.txt")
     list(APPEND EXTRA_LIBS jxl jxl_cms jxl_threads hwy brotlicommon brotlidec brotlienc)
 endif()
 
+# Configure libavif with dav1d and aom
+set(LIBAVIF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/source/libavif")
+if (EXISTS "${LIBAVIF_DIR}/CMakeLists.txt")
+    set(AVIF_CODEC_DAV1D "LOCAL" CACHE STRING "" FORCE)
+    set(AVIF_CODEC_AOM "LOCAL" CACHE STRING "" FORCE)
+    set(AVIF_CODEC_AOM_DECODE OFF CACHE BOOL "" FORCE) # dav1d is mandatory decoder backend
+    set(AVIF_CODEC_AOM_ENCODE ON CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_APPS OFF CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(AVIF_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory("${LIBAVIF_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/libavif_build" EXCLUDE_FROM_ALL)
+
+    include_directories("${LIBAVIF_DIR}/include")
+    list(APPEND SOURCES
+        decoders/avif_decoder.cpp
+        encoders/avif_encoder.cpp
+    )
+    add_definitions(-DKOMIKKU_HAS_AVIF)
+    list(APPEND EXTRA_LIBS avif)
+endif()
+
 add_library(komikku_benchmark SHARED ${SOURCES})
 
 target_link_libraries(

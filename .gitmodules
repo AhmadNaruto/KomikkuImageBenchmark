@@ -4,3 +4,9 @@
 [submodule "third_party/source/libjxl"]
 	path = third_party/source/libjxl
 	url = https://github.com/libjxl/libjxl.git
+[submodule "third_party/source/libavif"]
+	path = third_party/source/libavif
+	url = https://github.com/AOMediaCodec/libavif.git
+[submodule "third_party/source/dav1d"]
+	path = third_party/source/dav1d
+	url = https://code.videolan.org/videolan/dav1d.git

@@ -137,7 +137,10 @@ std::unique_ptr<IEncoder> CreateJxlEncoder() {
 }
 #endif
 
-#if !defined(KOMIKKU_HAS_AVIF)
+#if defined(KOMIKKU_HAS_AVIF)
+std::unique_ptr<IDecoder> CreateAvifDecoder();
+std::unique_ptr<IEncoder> CreateAvifEncoder();
+#else
 std::unique_ptr<IDecoder> CreateAvifDecoder() {
     return std::make_unique<StubDecoder>(CodecType::AVIF, "AVIF-Stub");
 }
