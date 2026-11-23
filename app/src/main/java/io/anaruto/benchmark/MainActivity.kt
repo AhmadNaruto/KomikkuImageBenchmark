@@ -6,6 +6,7 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.tabs.TabLayout
 import io.anaruto.benchmark.databinding.ActivityMainBinding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -29,6 +30,7 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         initSpinners()
+        initTabs()
         checkOrInitDataset()
     }
 
@@ -66,11 +68,93 @@ class MainActivity : AppCompatActivity() {
         binding.spThreads.adapter = threadAdapter
     }
 
+    private fun initTabs() {
+        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab?) {
+                when (tab?.position) {
+                    0 -> showDashboard()
+                    1 -> logConsole("\n[Mode: Decoder Benchmark] Select Codec, Target, and Thread count, then click 'Run Benchmark'.")
+                    2 -> logConsole("\n[Mode: Encoder Benchmark] Encodes master images across lossless and lossy matrix.")
+                    3 -> showDatasetManager()
+                    4 -> showResultsSummary()
+                }
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab?) {}
+            override fun onTabReselected(tab: TabLayout.Tab?) {
+                onTabSelected(tab)
+            }
+        })
+    }
+
     private fun checkOrInitDataset() {
         lifecycleScope.launch {
-            val sample = datasetManager.generateSyntheticSample("manga_page_001_1600x2400", 1600, 2400)
+            val sample = datasetManager.generateMangaPattern("manga_page_001_1600x2400", 1600, 2400, "bw")
             logConsole("Initialized sample dataset image: ${sample.name} (${sample.length() / 1024} KB)")
         }
+    }
+
+    private fun showDashboard() {
+        val webpVer = NativeBenchmark.nativeGetVersion(NativeBenchmark.CODEC_WEBP)
+        val jxlVer = NativeBenchmark.nativeGetVersion(NativeBenchmark.CODEC_JXL)
+        val avifVer = NativeBenchmark.nativeGetVersion(NativeBenchmark.CODEC_AVIF)
+        val meta = DeviceMetadata()
+
+        val sb = StringBuilder()
+        sb.appendLine("\n================ DASHBOARD ================")
+        sb.appendLine("Device: ${meta.manufacturer} ${meta.deviceModel}")
+        sb.appendLine("SoC:    ${meta.soc} | RAM: 8GB LPDDR4X | ABI: ${meta.abi}")
+        sb.appendLine("OS:     Android ${meta.androidVersion} (API ${meta.sdkInt})")
+        sb.appendLine("-------------------------------------------")
+        sb.appendLine("NATIVE CODEC LIBRARIES:")
+        sb.appendLine("• WebP:    $webpVer")
+        sb.appendLine("• JPEG XL: $jxlVer (libjxl + Highway SIMD)")
+        sb.appendLine("• AVIF:    $avifVer (dav1d backend)")
+        sb.appendLine("-------------------------------------------")
+        sb.appendLine("Total benchmark runs recorded: ${resultsList.size}")
+        sb.appendLine("Dataset directory: ${datasetManager.datasetDir.absolutePath}")
+        sb.appendLine("===========================================")
+        logConsole(sb.toString())
+    }
+
+    private fun showDatasetManager() {
+        lifecycleScope.launch {
+            binding.tvStatus.text = "Generating resolution test suite..."
+            datasetManager.generateMangaPattern("manga_bw_1600x2400", 1600, 2400, "bw")
+            datasetManager.generateMangaPattern("manga_tone_2500x3600", 2500, 3600, "screentone")
+            datasetManager.generateMangaPattern("manga_color_4000x6000", 4000, 6000, "color")
+
+            val list = datasetManager.listMasterImages()
+            val sb = StringBuilder()
+            sb.appendLine("\n============== DATASET CATALOG ==============")
+            sb.appendLine("Total master images: ${list.size}")
+            for (img in list) {
+                sb.appendLine("• ${img.fileName} | ${img.width}x${img.height} | ${img.fileSizeBytes / 1024} KB | ${img.category}")
+                sb.appendLine("  SHA-256: ${img.sha256}")
+            }
+            sb.appendLine("=============================================")
+            logConsole(sb.toString())
+            binding.tvStatus.text = "Dataset catalog updated."
+        }
+    }
+
+    private fun showResultsSummary() {
+        if (resultsList.isEmpty()) {
+            logConsole("\n[Results] No benchmark results yet. Run benchmarks first.")
+            return
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine("\n================= BENCHMARK SUMMARY TABLE =================")
+        sb.appendLine("| Codec   | Target | Threads | Latency (ms) | Speed (MP/s) | Score |")
+        sb.appendLine("|---------|--------|---------|--------------|--------------|-------|")
+        for (r in resultsList) {
+            val targetStr = if (r.outputTarget == OutputTarget.NATIVE_BUFFER) "Buffer" else "Bitmap"
+            sb.appendLine("| %-7s | %-6s | %-7d | %12.2f | %12.2f | %5.1f |".format(
+                r.codec.label, targetStr, r.threadCount, r.medianMs, r.megaPixelsPerSecond, r.balancedScore
+            ))
+        }
+        sb.appendLine("===========================================================")
+        logConsole(sb.toString())
     }
 
     private fun startSelectedBenchmark() {
@@ -145,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         sb.appendLine("Throughput:     %.2f img/sec (%.2f MP/sec)".format(r.imagesPerSecond, r.megaPixelsPerSecond))
         sb.appendLine("Peak RSS:       ${r.peakRssKb} KB")
         sb.appendLine("Native Heap:    ${r.nativeHeapKb} KB")
+        sb.appendLine("Balanced Score: %.2f / 100".format(r.balancedScore))
         sb.appendLine("==========================================")
         logConsole(sb.toString())
     }

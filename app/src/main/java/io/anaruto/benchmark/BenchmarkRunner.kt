@@ -1,9 +1,7 @@
 package io.anaruto.benchmark
 
 import android.graphics.Bitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.io.File
 import java.nio.ByteBuffer
 import kotlin.coroutines.coroutineContext
@@ -158,5 +156,122 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
             onProgress(BenchmarkProgress.Error("Exception in benchmark: ${e.message}"))
             return@withContext null
         }
+    }
+
+    /**
+     * Sequential manga reading simulation: decodes consecutive pages sequentially
+     */
+    suspend fun runSequentialReadingBenchmark(
+        codec: Codec,
+        pageFiles: List<File>,
+        target: OutputTarget,
+        threadCount: Int,
+        onProgress: (BenchmarkProgress) -> Unit
+    ): BenchmarkResult? = withContext(Dispatchers.Default) {
+        val samples = mutableListOf<Double>()
+        var lastTiming = BenchmarkTimingDetail()
+        val totalPages = pageFiles.size
+        var width = 1600
+        var height = 2400
+
+        for ((idx, file) in pageFiles.withIndex()) {
+            if (!coroutineContext.isActive) return@withContext null
+            val bytes = file.readBytes()
+            val timingDetail = DoubleArray(5)
+
+            if (target == OutputTarget.NATIVE_BUFFER) {
+                val buf = ByteBuffer.allocateDirect(width * height * 4)
+                if (NativeBenchmark.nativeDecodeToBuffer(codec.id, bytes, buf, threadCount, 0, timingDetail)) {
+                    samples.add(timingDetail[4])
+                }
+            } else {
+                val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                if (NativeBenchmark.nativeDecodeToBitmap(codec.id, bytes, bmp, threadCount, timingDetail)) {
+                    samples.add(timingDetail[4])
+                }
+                bmp.recycle()
+            }
+            lastTiming = BenchmarkTimingDetail(
+                initMs = timingDetail[0],
+                headerMs = timingDetail[1],
+                decodeMs = timingDetail[2],
+                colorConvertMs = timingDetail[3],
+                totalMs = timingDetail[4]
+            )
+            onProgress(BenchmarkProgress.Running(idx + 1, totalPages, "Sequential page ${idx + 1}/$totalPages"))
+        }
+
+        val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
+        val result = BenchmarkResult.computeStats(
+            codec = codec,
+            codecVersion = NativeBenchmark.nativeGetVersion(codec.id),
+            mode = BenchmarkMode.SEQUENTIAL_READING,
+            outputTarget = target,
+            imageName = "Sequential_${pageFiles.size}_Pages",
+            width = width,
+            height = height,
+            sourceBytes = pageFiles.sumOf { it.length() },
+            encodedBytes = pageFiles.sumOf { it.length() },
+            threadCount = threadCount,
+            rawSamples = samples,
+            timing = lastTiming,
+            peakRssKb = mem[1],
+            heapKb = mem[2]
+        )
+        onProgress(BenchmarkProgress.Completed(result))
+        return@withContext result
+    }
+
+    /**
+     * Parallel reading benchmark: workerCount concurrent workers decoding simultaneously
+     */
+    suspend fun runParallelBenchmark(
+        codec: Codec,
+        imageFile: File,
+        workerCount: Int,
+        codecThreadCount: Int,
+        totalTasks: Int,
+        onProgress: (BenchmarkProgress) -> Unit
+    ): BenchmarkResult? = withContext(Dispatchers.Default) {
+        val inBytes = imageFile.readBytes()
+        val samples = java.util.Collections.synchronizedList(mutableListOf<Double>())
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+        val dispatcher = Dispatchers.Default.limitedParallelism(workerCount)
+
+        coroutineScope {
+            val jobs = (1..totalTasks).map {
+                launch(dispatcher) {
+                    val directBuf = ByteBuffer.allocateDirect(1600 * 2400 * 4)
+                    val timing = DoubleArray(5)
+                    if (NativeBenchmark.nativeDecodeToBuffer(codec.id, inBytes, directBuf, codecThreadCount, 0, timing)) {
+                        samples.add(timing[4])
+                    }
+                    val c = completedCount.incrementAndGet()
+                    onProgress(BenchmarkProgress.Running(c, totalTasks, "Parallel worker task $c/$totalTasks (workers: $workerCount, threads: $codecThreadCount)"))
+                }
+            }
+            jobs.joinAll()
+        }
+
+        val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
+        val result = BenchmarkResult.computeStats(
+            codec = codec,
+            codecVersion = NativeBenchmark.nativeGetVersion(codec.id),
+            mode = BenchmarkMode.PARALLEL_DECODING,
+            outputTarget = OutputTarget.NATIVE_BUFFER,
+            imageName = imageFile.name,
+            width = 1600,
+            height = 2400,
+            sourceBytes = imageFile.length(),
+            encodedBytes = inBytes.size.toLong(),
+            threadCount = codecThreadCount,
+            rawSamples = samples.toList(),
+            timing = BenchmarkTimingDetail(totalMs = if (samples.isNotEmpty()) samples.average() else 0.0),
+            peakRssKb = mem[1],
+            heapKb = mem[2]
+        )
+        onProgress(BenchmarkProgress.Completed(result))
+        return@withContext result
     }
 }
