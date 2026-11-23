@@ -63,7 +63,7 @@ public:
 
         out_info->width = decoder->image->width;
         out_info->height = decoder->image->height;
-        out_info->has_alpha = (decoder->image->alphaPresent == AVIF_TRUE);
+        out_info->has_alpha = (decoder->alphaPresent == AVIF_TRUE);
         out_info->bit_depth = decoder->image->depth;
         out_info->codec = CodecType::AVIF;
 
