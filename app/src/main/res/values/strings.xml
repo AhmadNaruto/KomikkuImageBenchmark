@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Komikku Benchmark</string>
+    <string name="tab_dashboard">Dashboard</string>
+    <string name="tab_dataset">Dataset</string>
+    <string name="tab_decoder">Decoder</string>
+    <string name="tab_encoder">Encoder</string>
+    <string name="tab_results">Results</string>
+</resources>
