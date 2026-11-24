@@ -215,14 +215,19 @@ class MainActivity : AppCompatActivity() {
         val isEncoderMode = (binding.tabLayout.selectedTabPosition == 2)
 
         if (isEncoderMode) {
+            val encEffort = when (selectedCodec) {
+                Codec.JXL -> 7
+                Codec.AVIF -> 6 // speed 6 (industry-standard balanced preset for AV1 still image)
+                Codec.WEBP -> 4
+            }
             val encConfig = EncoderBenchmarkConfig(
                 codec = selectedCodec,
                 lossless = true,
                 quality = 90,
-                effort = if (selectedCodec == Codec.JXL) 7 else 4,
+                effort = encEffort,
                 threadCount = threads,
-                warmupIterations = 3,
-                testIterations = 10
+                warmupIterations = 1,
+                testIterations = 3
             )
             logConsole("\n--- Starting Encoder Benchmark: ${selectedCodec.label} | $threads threads ---")
 
@@ -233,6 +238,9 @@ class MainActivity : AppCompatActivity() {
                             binding.tvStatus.text = progress.message
                             binding.progressBar.max = progress.totalIterations
                             binding.progressBar.progress = progress.currentIteration
+                            if (progress.currentIteration > 0) {
+                                logConsole("  • ${progress.message}")
+                            }
                         }
                         is BenchmarkRunner.BenchmarkProgress.Completed -> {
                             resultsList.add(progress.result)
@@ -267,6 +275,9 @@ class MainActivity : AppCompatActivity() {
                             binding.tvStatus.text = progress.message
                             binding.progressBar.max = progress.totalIterations
                             binding.progressBar.progress = progress.currentIteration
+                            if (progress.currentIteration == 1 || progress.currentIteration % 5 == 0 || progress.currentIteration == progress.totalIterations) {
+                                logConsole("  • ${progress.message}")
+                            }
                         }
                         is BenchmarkRunner.BenchmarkProgress.Completed -> {
                             resultsList.add(progress.result)

@@ -56,6 +56,7 @@ public:
         }
 
         encoder->maxThreads = (options.thread_count > 0) ? options.thread_count : 1;
+        encoder->autoTiling = AVIF_TRUE;
         encoder->speed = options.effort_or_method; // Speed setting (0-10: fast ~6-8, balanced ~4, slow ~1-2)
         if (encoder->speed < 0) encoder->speed = 0;
         if (encoder->speed > 10) encoder->speed = 10;

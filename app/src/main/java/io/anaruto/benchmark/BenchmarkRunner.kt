@@ -234,18 +234,27 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                 val encodedBytes = NativeBenchmark.nativeEncodeFromBitmap(
                     config.codec.id, bitmap, config.lossless, config.quality, config.effort, config.threadCount, timingDetail
                 )
+                var iterDetailStr = ""
                 if (encodedBytes != null && encodedBytes.isNotEmpty()) {
                     samples.add(timingDetail[4])
                     lastEncodedSize = encodedBytes.size.toLong()
+                    iterDetailStr = " (%.1f ms, %d KB)".format(timingDetail[4], lastEncodedSize / 1024)
                 }
                 sendProgress(onProgress, BenchmarkProgress.Running(
                     config.warmupIterations + i + 1,
                     config.warmupIterations + config.testIterations,
-                    "Measuring encode iteration ${i + 1}/${config.testIterations}"
+                    "Measuring encode iteration ${i + 1}/${config.testIterations}$iterDetailStr"
                 ))
             }
 
             bitmap.recycle()
+
+            if (samples.isEmpty()) {
+                val err = NativeBenchmark.nativeGetLastError() ?: "Unknown encoding error"
+                sendProgress(onProgress, BenchmarkProgress.Error("Encoder failed for ${config.codec.label}: $err"))
+                return@withContext null
+            }
+
             val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
             val result = BenchmarkResult.computeStats(
                 codec = config.codec,
