@@ -8,6 +8,7 @@ import android.os.Environment
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.tabs.TabLayout
@@ -46,12 +47,17 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRunBenchmark.setOnClickListener {
             if (benchmarkJob?.isActive == true) {
-                benchmarkJob?.cancel()
-                binding.btnRunBenchmark.text = "Run Benchmark"
-                binding.tvStatus.text = "Cancelled"
-                binding.progressBar.visibility = View.GONE
+                cancelBenchmark()
             } else {
                 startSelectedBenchmark()
+            }
+        }
+
+        binding.btnRunAll.setOnClickListener {
+            if (benchmarkJob?.isActive == true) {
+                cancelBenchmark()
+            } else {
+                showRunAllDialog()
             }
         }
 
@@ -178,13 +184,201 @@ class MainActivity : AppCompatActivity() {
         sb.appendLine("| Codec   | Target | Threads | Latency (ms) | Speed (MP/s) | Score |")
         sb.appendLine("|---------|--------|---------|--------------|--------------|-------|")
         for (r in resultsList) {
-            val targetStr = if (r.outputTarget == OutputTarget.NATIVE_BUFFER) "Buffer" else "Bitmap"
+            val targetStr = if (r.isEncoder) "Encode" else (if (r.outputTarget == OutputTarget.NATIVE_BUFFER) "Buffer" else "Bitmap")
             sb.appendLine("| %-7s | %-6s | %-7d | %12.2f | %12.2f | %5.1f |".format(
                 r.codec.label, targetStr, r.threadCount, r.medianMs, r.megaPixelsPerSecond, r.balancedScore
             ))
         }
         sb.appendLine("===========================================================")
         logConsole(sb.toString())
+    }
+
+    private fun getSelectedThreads(): Int {
+        return when (binding.spThreads.selectedItemPosition) {
+            1 -> 2
+            2 -> 4
+            else -> 1
+        }
+    }
+
+    private fun cancelBenchmark() {
+        benchmarkJob?.cancel()
+        benchmarkJob = null
+        binding.btnRunBenchmark.text = "Run Single"
+        binding.btnRunAll.text = "Run All"
+        binding.progressBar.visibility = View.GONE
+        binding.tvStatus.text = "Benchmark cancelled."
+        logConsole("Benchmark cancelled by user.")
+    }
+
+    private fun showRunAllDialog() {
+        if (benchmarkJob?.isActive == true) {
+            cancelBenchmark()
+            return
+        }
+
+        val options = arrayOf(
+            "Run All Decoders (Native Buffer & Android Bitmap - 6 tests)",
+            "Run All Encoders (WebP, JXL, AVIF - 3 tests)"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Run All Benchmark Suite")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> runAllDecoders()
+                    1 -> runAllEncoders()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun runAllDecoders() {
+        if (benchmarkJob?.isActive == true) {
+            cancelBenchmark()
+            return
+        }
+
+        val threads = getSelectedThreads()
+        val sampleFile = File(datasetManager.mastersDir, "manga_page_001_1600x2400.png")
+
+        binding.btnRunBenchmark.text = "Stop Benchmark"
+        binding.btnRunAll.text = "Stop"
+        binding.progressBar.visibility = View.VISIBLE
+        binding.progressBar.progress = 0
+
+        val suites = listOf(
+            Pair(Codec.WEBP, OutputTarget.NATIVE_BUFFER),
+            Pair(Codec.WEBP, OutputTarget.ANDROID_BITMAP),
+            Pair(Codec.JXL, OutputTarget.NATIVE_BUFFER),
+            Pair(Codec.JXL, OutputTarget.ANDROID_BITMAP),
+            Pair(Codec.AVIF, OutputTarget.NATIVE_BUFFER),
+            Pair(Codec.AVIF, OutputTarget.ANDROID_BITMAP)
+        )
+
+        logConsole("\n=======================================================")
+        logConsole(">>> STARTING SUITE: ALL DECODERS (6 TESTS) | $threads THREAD(S) <<<")
+        logConsole("=======================================================")
+
+        benchmarkJob = lifecycleScope.launch {
+            for ((index, pair) in suites.withIndex()) {
+                if (!coroutineContext.isActive) break
+                val (codec, target) = pair
+                val config = DecoderBenchmarkConfig(
+                    codec = codec,
+                    outputTarget = target,
+                    threadCount = threads,
+                    warmupIterations = 3,
+                    testIterations = 10
+                )
+                val suiteNum = index + 1
+                val totalSuites = suites.size
+                logConsole("\n[Suite $suiteNum/$totalSuites] Decoding ${codec.label} | $target | $threads thread(s)")
+
+                val result = runner.runDecoderBenchmark(config, sampleFile) { progress ->
+                    when (progress) {
+                        is BenchmarkRunner.BenchmarkProgress.Running -> {
+                            binding.tvStatus.text = "Suite $suiteNum/$totalSuites: ${progress.message}"
+                            binding.progressBar.max = progress.totalIterations
+                            binding.progressBar.progress = progress.currentIteration
+                            if (progress.currentIteration == 1 || progress.currentIteration % 5 == 0 || progress.currentIteration == progress.totalIterations) {
+                                logConsole("  • ${progress.message}")
+                            }
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Error -> {
+                            logConsole("  ERROR: ${progress.message}")
+                        }
+                        else -> {}
+                    }
+                }
+
+                if (result != null) {
+                    resultsList.add(result)
+                    displayResultSummary(result)
+                }
+            }
+
+            binding.btnRunBenchmark.text = "Run Single"
+            binding.btnRunAll.text = "Run All"
+            binding.progressBar.visibility = View.GONE
+            binding.tvStatus.text = "All Decoders Suite Completed."
+
+            showResultsSummary()
+        }
+    }
+
+    private fun runAllEncoders() {
+        if (benchmarkJob?.isActive == true) {
+            cancelBenchmark()
+            return
+        }
+
+        val threads = getSelectedThreads()
+        val sampleFile = File(datasetManager.mastersDir, "manga_page_001_1600x2400.png")
+
+        binding.btnRunBenchmark.text = "Stop Benchmark"
+        binding.btnRunAll.text = "Stop"
+        binding.progressBar.visibility = View.VISIBLE
+        binding.progressBar.progress = 0
+
+        val codecs = listOf(Codec.WEBP, Codec.JXL, Codec.AVIF)
+
+        logConsole("\n=======================================================")
+        logConsole(">>> STARTING SUITE: ALL ENCODERS (3 TESTS) | $threads THREAD(S) <<<")
+        logConsole("=======================================================")
+
+        benchmarkJob = lifecycleScope.launch {
+            for ((index, codec) in codecs.withIndex()) {
+                if (!coroutineContext.isActive) break
+                val encEffort = when (codec) {
+                    Codec.JXL -> 7
+                    Codec.AVIF -> 6
+                    Codec.WEBP -> 4
+                }
+                val encConfig = EncoderBenchmarkConfig(
+                    codec = codec,
+                    lossless = true,
+                    quality = 90,
+                    effort = encEffort,
+                    threadCount = threads,
+                    warmupIterations = 1,
+                    testIterations = 3
+                )
+                val suiteNum = index + 1
+                val totalSuites = codecs.size
+                logConsole("\n[Suite $suiteNum/$totalSuites] Encoding ${codec.label} | $threads thread(s)")
+
+                val result = runner.runEncoderBenchmark(encConfig, sampleFile) { progress ->
+                    when (progress) {
+                        is BenchmarkRunner.BenchmarkProgress.Running -> {
+                            binding.tvStatus.text = "Suite $suiteNum/$totalSuites: ${progress.message}"
+                            binding.progressBar.max = progress.totalIterations
+                            binding.progressBar.progress = progress.currentIteration
+                            if (progress.currentIteration > 0) {
+                                logConsole("  • ${progress.message}")
+                            }
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Error -> {
+                            logConsole("  ERROR: ${progress.message}")
+                        }
+                        else -> {}
+                    }
+                }
+
+                if (result != null) {
+                    resultsList.add(result)
+                    displayResultSummary(result)
+                }
+            }
+
+            binding.btnRunBenchmark.text = "Run Single"
+            binding.btnRunAll.text = "Run All"
+            binding.progressBar.visibility = View.GONE
+            binding.tvStatus.text = "All Encoders Suite Completed."
+
+            showResultsSummary()
+        }
     }
 
     private fun startSelectedBenchmark() {
@@ -200,15 +394,12 @@ class MainActivity : AppCompatActivity() {
             OutputTarget.ANDROID_BITMAP
         }
 
-        val threads = when (binding.spThreads.selectedItemPosition) {
-            1 -> 2
-            2 -> 4
-            else -> 1
-        }
+        val threads = getSelectedThreads()
 
         val sampleFile = File(datasetManager.mastersDir, "manga_page_001_1600x2400.png")
 
         binding.btnRunBenchmark.text = "Stop Benchmark"
+        binding.btnRunAll.text = "Stop"
         binding.progressBar.visibility = View.VISIBLE
         binding.progressBar.progress = 0
 
@@ -245,13 +436,15 @@ class MainActivity : AppCompatActivity() {
                         is BenchmarkRunner.BenchmarkProgress.Completed -> {
                             resultsList.add(progress.result)
                             displayResultSummary(progress.result)
-                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.btnRunBenchmark.text = "Run Single"
+                            binding.btnRunAll.text = "Run All"
                             binding.progressBar.visibility = View.GONE
                             binding.tvStatus.text = "Encoder Benchmark Completed"
                         }
                         is BenchmarkRunner.BenchmarkProgress.Error -> {
                             logConsole("ERROR: ${progress.message}")
-                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.btnRunBenchmark.text = "Run Single"
+                            binding.btnRunAll.text = "Run All"
                             binding.progressBar.visibility = View.GONE
                             binding.tvStatus.text = "Error: ${progress.message}"
                         }
@@ -282,13 +475,15 @@ class MainActivity : AppCompatActivity() {
                         is BenchmarkRunner.BenchmarkProgress.Completed -> {
                             resultsList.add(progress.result)
                             displayResultSummary(progress.result)
-                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.btnRunBenchmark.text = "Run Single"
+                            binding.btnRunAll.text = "Run All"
                             binding.progressBar.visibility = View.GONE
                             binding.tvStatus.text = "Decoder Benchmark Completed"
                         }
                         is BenchmarkRunner.BenchmarkProgress.Error -> {
                             logConsole("ERROR: ${progress.message}")
-                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.btnRunBenchmark.text = "Run Single"
+                            binding.btnRunAll.text = "Run All"
                             binding.progressBar.visibility = View.GONE
                             binding.tvStatus.text = "Error: ${progress.message}"
                         }

@@ -276,7 +276,8 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                     totalMs = timingDetail[4]
                 ),
                 peakRssKb = mem[1],
-                heapKb = mem[2]
+                heapKb = mem[2],
+                isEncoder = true
             )
 
             sendProgress(onProgress, BenchmarkProgress.Completed(result))

@@ -47,7 +47,8 @@ data class BenchmarkResult(
     val nativeHeapKb: Long,
     val balancedScore: Double = 0.0,
     val timestamp: Long = System.currentTimeMillis(),
-    val deviceMetadata: DeviceMetadata = DeviceMetadata()
+    val deviceMetadata: DeviceMetadata = DeviceMetadata(),
+    val isEncoder: Boolean = false
 ) {
     companion object {
         fun computeStats(
@@ -64,7 +65,8 @@ data class BenchmarkResult(
             rawSamples: List<Double>,
             timing: BenchmarkTimingDetail,
             peakRssKb: Long,
-            heapKb: Long
+            heapKb: Long,
+            isEncoder: Boolean = false
         ): BenchmarkResult {
             val valid = rawSamples.filter { it > 0.0 }.sorted()
             if (valid.isEmpty()) {
@@ -90,7 +92,8 @@ data class BenchmarkResult(
                     imagesPerSecond = 0.0,
                     megaPixelsPerSecond = 0.0,
                     peakRssKb = peakRssKb,
-                    nativeHeapKb = heapKb
+                    nativeHeapKb = heapKb,
+                    isEncoder = isEncoder
                 )
             }
 
@@ -106,7 +109,8 @@ data class BenchmarkResult(
             val mpps = ips * megapixels
 
             // Section 16 Balanced Score calculation (0-100)
-            val decodeScore = (100.0 - (median / 5.0)).coerceIn(0.0, 100.0)
+            val speedFactor = if (isEncoder) 50.0 else 5.0
+            val decodeScore = (100.0 - (median / speedFactor)).coerceIn(0.0, 100.0)
             val storageScore = if (sourceBytes > 0) {
                 ((1.0 - (encodedBytes.toDouble() / sourceBytes.toDouble())) * 100.0 + 50.0).coerceIn(0.0, 100.0)
             } else 50.0
@@ -143,7 +147,8 @@ data class BenchmarkResult(
                 megaPixelsPerSecond = mpps,
                 peakRssKb = peakRssKb,
                 nativeHeapKb = heapKb,
-                balancedScore = balanced
+                balancedScore = balanced,
+                isEncoder = isEncoder
             )
         }
 
