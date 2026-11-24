@@ -1,6 +1,10 @@
 package io.anaruto.benchmark
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
+import android.os.Environment
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -53,6 +57,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnExport.setOnClickListener {
             exportCurrentResults()
+        }
+
+        binding.btnCopy.setOnClickListener {
+            copyConsoleToClipboard()
         }
     }
 
@@ -294,6 +302,14 @@ class MainActivity : AppCompatActivity() {
         sb.appendLine("Balanced Score: %.2f / 100".format(r.balancedScore))
         sb.appendLine("==========================================")
         logConsole(sb.toString())
+        copyConsoleToClipboard()
+    }
+
+    private fun copyConsoleToClipboard() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = ClipData.newPlainText("Komikku Benchmark Log", binding.tvConsole.text.toString())
+        clipboard?.setPrimaryClip(clip)
+        Toast.makeText(this, "Copied log to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
     private fun exportCurrentResults() {
@@ -302,21 +318,38 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val exportDir = File(datasetManager.datasetDir, "results").apply { mkdirs() }
         val ts = System.currentTimeMillis()
-        val csvFile = File(exportDir, "benchmark_results_$ts.csv")
-        val jsonFile = File(exportDir, "benchmark_results_$ts.json")
+        val csvName = "benchmark_results_$ts.csv"
+        val jsonName = "benchmark_results_$ts.json"
 
-        val csvOk = CsvExporter.export(resultsList, csvFile)
-        val jsonOk = JsonExporter.export(resultsList, jsonFile)
+        // 1. Save to public Downloads directory for easy access
+        val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "KomikkuBenchmark/results").apply { mkdirs() }
+        // 2. Save to app external files dir
+        val extDir = getExternalFilesDir("results")?.apply { mkdirs() }
+        // 3. Save to app internal files dir
+        val internalDir = File(datasetManager.datasetDir, "results").apply { mkdirs() }
 
-        if (csvOk && jsonOk) {
-            logConsole("Exported CSV: ${csvFile.absolutePath}")
-            logConsole("Exported JSON: ${jsonFile.absolutePath}")
-            Toast.makeText(this, "Exported results successfully!", Toast.LENGTH_LONG).show()
-        } else {
-            Toast.makeText(this, "Failed to export results", Toast.LENGTH_SHORT).show()
+        val targetDirs = listOfNotNull(downloadDir, extDir, internalDir)
+        var primaryExportPath = ""
+
+        for (dir in targetDirs) {
+            try {
+                if (dir.exists()) {
+                    val csvFile = File(dir, csvName)
+                    val jsonFile = File(dir, jsonName)
+                    CsvExporter.export(resultsList, csvFile)
+                    JsonExporter.export(resultsList, jsonFile)
+                    if (primaryExportPath.isEmpty() && csvFile.exists()) {
+                        primaryExportPath = dir.absolutePath
+                    }
+                }
+            } catch (_: Exception) {}
         }
+
+        copyConsoleToClipboard()
+        logConsole("\n[Exported] Results saved to: $primaryExportPath")
+        logConsole("[Clipboard] Full log copied to clipboard! You can paste it directly.")
+        Toast.makeText(this, "Exported & copied log to clipboard!", Toast.LENGTH_LONG).show()
     }
 
     private fun logConsole(msg: String) {

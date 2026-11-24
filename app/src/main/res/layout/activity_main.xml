@@ -92,9 +92,17 @@
             android:id="@+id/btnExport"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="6dp"
             android:layout_weight="1"
-            android:text="Export CSV/JSON" />
+            android:text="Export" />
+
+        <Button
+            android:id="@+id/btnCopy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:text="Copy Log" />
     </LinearLayout>
 
     <ProgressBar
@@ -128,7 +136,8 @@
             android:padding="8dp"
             android:text="Ready.\n"
             android:textColor="#212121"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:textIsSelectable="true" />
     </ScrollView>
 
 </LinearLayout>
