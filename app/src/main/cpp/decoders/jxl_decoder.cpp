@@ -115,7 +115,7 @@ public:
 
         if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(
             dec.get(),
-            JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_NEED_IMAGE_OUT_BUFFER | JXL_DEC_FULL_IMAGE
+            JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE
         )) {
             last_error_ = "JXL: Failed to subscribe decoder events";
             return false;
@@ -138,6 +138,9 @@ public:
         format.num_channels = 4;
 
         bool buffer_set = false;
+        std::vector<uint8_t> temp_rgba;
+        uint8_t* target_buffer = out_buffer;
+        size_t target_capacity = out_capacity;
 
         while (true) {
             JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
@@ -162,24 +165,15 @@ public:
                                   ") smaller than required (" + std::to_string(req) + ")";
                     return false;
                 }
-            } else if (status == JXL_DEC_COLOR_ENCODING) {
-                // Set default sRGB color encoding
-                JxlColorEncoding color_encoding = {};
-                color_encoding.color_space = JXL_COLOR_SPACE_RGB;
-                color_encoding.white_point = JXL_WHITE_POINT_D65;
-                color_encoding.primaries = JXL_PRIMARIES_SRGB;
-                color_encoding.transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
-                color_encoding.rendering_intent = JXL_RENDERING_INTENT_PERCEPTUAL;
-                JxlColorEncodingSetToSRGB(&color_encoding, /*is_gray=*/JXL_FALSE);
-                JxlDecoderSetPreferredColorProfile(dec.get(), &color_encoding);
+
+                if (options.output_format == PixelFormat::RGB_565) {
+                    temp_rgba.resize(basic_info.xsize * basic_info.ysize * 4);
+                    target_buffer = temp_rgba.data();
+                    target_capacity = temp_rgba.size();
+                }
             } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
                 if (!buffer_set) {
-                    size_t buffer_size = basic_info.xsize * basic_info.ysize * 4;
-                    if (options.output_format == PixelFormat::RGB_565) {
-                        // Allocate temporary buffer for RGBA if RGB565 is requested
-                        // Alternatively handled via post conversion
-                    }
-                    if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(dec.get(), &format, out_buffer, out_capacity)) {
+                    if (JXL_DEC_SUCCESS != JxlDecoderSetImageOutBuffer(dec.get(), &format, target_buffer, target_capacity)) {
                         last_error_ = "JXL: Failed to set output image buffer";
                         return false;
                     }

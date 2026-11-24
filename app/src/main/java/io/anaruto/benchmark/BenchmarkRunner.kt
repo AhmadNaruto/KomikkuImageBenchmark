@@ -81,6 +81,12 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         sendProgress(onProgress, BenchmarkProgress.Running(config.warmupIterations + i + 1, config.warmupIterations + config.testIterations, "Measuring iteration ${i + 1}/${config.testIterations}"))
                     }
 
+                    if (samples.isEmpty()) {
+                        val err = NativeBenchmark.nativeGetLastError() ?: "Unknown decoding error"
+                        sendProgress(onProgress, BenchmarkProgress.Error("Decoder failed for ${config.codec.label}: $err"))
+                        return@withContext null
+                    }
+
                     val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
                     val result = BenchmarkResult.computeStats(
                         codec = config.codec,
@@ -142,6 +148,13 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                     }
 
                     bitmap.recycle()
+
+                    if (samples.isEmpty()) {
+                        val err = NativeBenchmark.nativeGetLastError() ?: "Unknown decoding error"
+                        sendProgress(onProgress, BenchmarkProgress.Error("Decoder failed for ${config.codec.label}: $err"))
+                        return@withContext null
+                    }
+
                     val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
                     val result = BenchmarkResult.computeStats(
                         codec = config.codec,
