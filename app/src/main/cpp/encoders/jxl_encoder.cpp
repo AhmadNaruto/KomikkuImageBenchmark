@@ -86,6 +86,7 @@ public:
         basic_info.bits_per_sample = 8;
         basic_info.uses_original_profile = options.lossless ? JXL_TRUE : JXL_FALSE;
         basic_info.num_color_channels = 3;
+        basic_info.num_extra_channels = 1;
         basic_info.alpha_bits = 8;
 
         if (JXL_ENC_SUCCESS != JxlEncoderSetBasicInfo(enc.get(), &basic_info)) {

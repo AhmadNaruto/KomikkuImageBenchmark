@@ -66,7 +66,7 @@ class DatasetManager(private val context: Context) {
         try {
             val effort = when (codec) {
                 Codec.JXL -> 7
-                Codec.AVIF -> 4
+                Codec.AVIF -> 6
                 Codec.WEBP -> 4
             }
             val encodedBytes = NativeBenchmark.nativeEncodeFromBitmap(
