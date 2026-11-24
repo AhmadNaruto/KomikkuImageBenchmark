@@ -1,6 +1,7 @@
 package io.anaruto.benchmark
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import kotlinx.coroutines.*
 import java.io.File
 import java.nio.ByteBuffer
@@ -14,6 +15,15 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
         data class Error(val message: String) : BenchmarkProgress()
     }
 
+    private suspend fun sendProgress(
+        onProgress: (BenchmarkProgress) -> Unit,
+        progress: BenchmarkProgress
+    ) {
+        withContext(Dispatchers.Main) {
+            onProgress(progress)
+        }
+    }
+
     suspend fun runDecoderBenchmark(
         config: DecoderBenchmarkConfig,
         imageFile: File,
@@ -21,11 +31,19 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
     ): BenchmarkResult? = withContext(Dispatchers.Default) {
         try {
             if (!imageFile.exists()) {
-                onProgress(BenchmarkProgress.Error("File not found: ${imageFile.name}"))
+                sendProgress(onProgress, BenchmarkProgress.Error("File not found: ${imageFile.name}"))
                 return@withContext null
             }
 
-            val inBytes = imageFile.readBytes()
+            // Ensure we are decoding the proper codec file. If a PNG master is passed, encode it first.
+            val targetFile = if (imageFile.extension.equals("png", ignoreCase = true)) {
+                sendProgress(onProgress, BenchmarkProgress.Running(0, config.warmupIterations + config.testIterations, "Preparing ${config.codec.label} bitstream..."))
+                datasetManager.getOrEncodeSample(imageFile, config.codec)
+            } else {
+                imageFile
+            }
+
+            val inBytes = targetFile.readBytes()
             val info = IntArray(4)
             val infoOk = NativeBenchmark.nativeGetInfo(config.codec.id, inBytes, info)
 
@@ -46,7 +64,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         NativeBenchmark.nativeDecodeToBuffer(
                             config.codec.id, inBytes, directBuf, config.threadCount, config.pixelLayout.id, null
                         )
-                        onProgress(BenchmarkProgress.Running(i + 1, config.warmupIterations + config.testIterations, "Warming up..."))
+                        sendProgress(onProgress, BenchmarkProgress.Running(i + 1, config.warmupIterations + config.testIterations, "Warming up (${i + 1}/${config.warmupIterations})..."))
                     }
 
                     // Measured
@@ -60,7 +78,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         if (ok) {
                             samples.add(timingDetail[4]) // totalMs
                         }
-                        onProgress(BenchmarkProgress.Running(config.warmupIterations + i + 1, config.warmupIterations + config.testIterations, "Measuring iteration ${i + 1}/${config.testIterations}"))
+                        sendProgress(onProgress, BenchmarkProgress.Running(config.warmupIterations + i + 1, config.warmupIterations + config.testIterations, "Measuring iteration ${i + 1}/${config.testIterations}"))
                     }
 
                     val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
@@ -69,10 +87,10 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         codecVersion = version,
                         mode = config.mode,
                         outputTarget = config.outputTarget,
-                        imageName = imageFile.name,
+                        imageName = targetFile.name,
                         width = width,
                         height = height,
-                        sourceBytes = imageFile.length(),
+                        sourceBytes = targetFile.length(),
                         encodedBytes = inBytes.size.toLong(),
                         threadCount = config.threadCount,
                         rawSamples = samples,
@@ -87,7 +105,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         heapKb = mem[2]
                     )
 
-                    onProgress(BenchmarkProgress.Completed(result))
+                    sendProgress(onProgress, BenchmarkProgress.Completed(result))
                     return@withContext result
                 }
 
@@ -104,7 +122,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         NativeBenchmark.nativeDecodeToBitmap(
                             config.codec.id, inBytes, bitmap, config.threadCount, null
                         )
-                        onProgress(BenchmarkProgress.Running(i + 1, config.warmupIterations + config.testIterations, "Warming up..."))
+                        sendProgress(onProgress, BenchmarkProgress.Running(i + 1, config.warmupIterations + config.testIterations, "Warming up (${i + 1}/${config.warmupIterations})..."))
                     }
 
                     // Measured
@@ -120,7 +138,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         if (ok) {
                             samples.add(timingDetail[4])
                         }
-                        onProgress(BenchmarkProgress.Running(config.warmupIterations + i + 1, config.warmupIterations + config.testIterations, "Measuring iteration ${i + 1}/${config.testIterations}"))
+                        sendProgress(onProgress, BenchmarkProgress.Running(config.warmupIterations + i + 1, config.warmupIterations + config.testIterations, "Measuring iteration ${i + 1}/${config.testIterations}"))
                     }
 
                     bitmap.recycle()
@@ -130,10 +148,10 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         codecVersion = version,
                         mode = config.mode,
                         outputTarget = config.outputTarget,
-                        imageName = imageFile.name,
+                        imageName = targetFile.name,
                         width = width,
                         height = height,
-                        sourceBytes = imageFile.length(),
+                        sourceBytes = targetFile.length(),
                         encodedBytes = inBytes.size.toLong(),
                         threadCount = config.threadCount,
                         rawSamples = samples,
@@ -148,12 +166,101 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         heapKb = mem[2]
                     )
 
-                    onProgress(BenchmarkProgress.Completed(result))
+                    sendProgress(onProgress, BenchmarkProgress.Completed(result))
                     return@withContext result
                 }
             }
         } catch (e: Exception) {
-            onProgress(BenchmarkProgress.Error("Exception in benchmark: ${e.message}"))
+            sendProgress(onProgress, BenchmarkProgress.Error("Exception in benchmark: ${e.message}"))
+            return@withContext null
+        }
+    }
+
+    suspend fun runEncoderBenchmark(
+        config: EncoderBenchmarkConfig,
+        masterFile: File,
+        onProgress: (BenchmarkProgress) -> Unit
+    ): BenchmarkResult? = withContext(Dispatchers.Default) {
+        try {
+            if (!masterFile.exists()) {
+                sendProgress(onProgress, BenchmarkProgress.Error("Master file not found: ${masterFile.name}"))
+                return@withContext null
+            }
+
+            val bitmap = BitmapFactory.decodeFile(masterFile.absolutePath)
+            if (bitmap == null) {
+                sendProgress(onProgress, BenchmarkProgress.Error("Failed to decode master image: ${masterFile.name}"))
+                return@withContext null
+            }
+
+            val width = bitmap.width
+            val height = bitmap.height
+            val version = NativeBenchmark.nativeGetVersion(config.codec.id)
+            val timingDetail = DoubleArray(5)
+
+            // Warmup
+            for (i in 0 until config.warmupIterations) {
+                if (!coroutineContext.isActive) {
+                    bitmap.recycle()
+                    return@withContext null
+                }
+                NativeBenchmark.nativeEncodeFromBitmap(
+                    config.codec.id, bitmap, config.lossless, config.quality, config.effort, config.threadCount, null
+                )
+                sendProgress(onProgress, BenchmarkProgress.Running(i + 1, config.warmupIterations + config.testIterations, "Warming up encoder (${i + 1}/${config.warmupIterations})..."))
+            }
+
+            // Measured
+            val samples = mutableListOf<Double>()
+            var lastEncodedSize = 0L
+            for (i in 0 until config.testIterations) {
+                if (!coroutineContext.isActive) {
+                    bitmap.recycle()
+                    return@withContext null
+                }
+                val encodedBytes = NativeBenchmark.nativeEncodeFromBitmap(
+                    config.codec.id, bitmap, config.lossless, config.quality, config.effort, config.threadCount, timingDetail
+                )
+                if (encodedBytes != null && encodedBytes.isNotEmpty()) {
+                    samples.add(timingDetail[4])
+                    lastEncodedSize = encodedBytes.size.toLong()
+                }
+                sendProgress(onProgress, BenchmarkProgress.Running(
+                    config.warmupIterations + i + 1,
+                    config.warmupIterations + config.testIterations,
+                    "Measuring encode iteration ${i + 1}/${config.testIterations}"
+                ))
+            }
+
+            bitmap.recycle()
+            val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
+            val result = BenchmarkResult.computeStats(
+                codec = config.codec,
+                codecVersion = version,
+                mode = BenchmarkMode.SINGLE_LATENCY,
+                outputTarget = OutputTarget.NATIVE_BUFFER,
+                imageName = masterFile.name,
+                width = width,
+                height = height,
+                sourceBytes = masterFile.length(),
+                encodedBytes = lastEncodedSize,
+                threadCount = config.threadCount,
+                rawSamples = samples,
+                timing = BenchmarkTimingDetail(
+                    initMs = timingDetail[0],
+                    headerMs = timingDetail[1],
+                    decodeMs = timingDetail[2],
+                    colorConvertMs = timingDetail[3],
+                    totalMs = timingDetail[4]
+                ),
+                peakRssKb = mem[1],
+                heapKb = mem[2]
+            )
+
+            sendProgress(onProgress, BenchmarkProgress.Completed(result))
+            return@withContext result
+        } catch (e: Exception) {
+            sendProgress(onProgress, BenchmarkProgress.Error("Exception in encoder benchmark: ${e.message}"))
             return@withContext null
         }
     }
@@ -176,7 +283,12 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
 
         for ((idx, file) in pageFiles.withIndex()) {
             if (!coroutineContext.isActive) return@withContext null
-            val bytes = file.readBytes()
+            val targetFile = if (file.extension.equals("png", ignoreCase = true)) {
+                datasetManager.getOrEncodeSample(file, codec)
+            } else {
+                file
+            }
+            val bytes = targetFile.readBytes()
             val timingDetail = DoubleArray(5)
 
             if (target == OutputTarget.NATIVE_BUFFER) {
@@ -198,7 +310,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                 colorConvertMs = timingDetail[3],
                 totalMs = timingDetail[4]
             )
-            onProgress(BenchmarkProgress.Running(idx + 1, totalPages, "Sequential page ${idx + 1}/$totalPages"))
+            sendProgress(onProgress, BenchmarkProgress.Running(idx + 1, totalPages, "Sequential page ${idx + 1}/$totalPages"))
         }
 
         val mem = NativeBenchmark.nativeGetMemoryMetrics() ?: longArrayOf(0, 0, 0)
@@ -218,7 +330,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
             peakRssKb = mem[1],
             heapKb = mem[2]
         )
-        onProgress(BenchmarkProgress.Completed(result))
+        sendProgress(onProgress, BenchmarkProgress.Completed(result))
         return@withContext result
     }
 
@@ -233,7 +345,12 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
         totalTasks: Int,
         onProgress: (BenchmarkProgress) -> Unit
     ): BenchmarkResult? = withContext(Dispatchers.Default) {
-        val inBytes = imageFile.readBytes()
+        val targetFile = if (imageFile.extension.equals("png", ignoreCase = true)) {
+            datasetManager.getOrEncodeSample(imageFile, codec)
+        } else {
+            imageFile
+        }
+        val inBytes = targetFile.readBytes()
         val samples = java.util.Collections.synchronizedList(mutableListOf<Double>())
         val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
 
@@ -248,7 +365,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
                         samples.add(timing[4])
                     }
                     val c = completedCount.incrementAndGet()
-                    onProgress(BenchmarkProgress.Running(c, totalTasks, "Parallel worker task $c/$totalTasks (workers: $workerCount, threads: $codecThreadCount)"))
+                    sendProgress(onProgress, BenchmarkProgress.Running(c, totalTasks, "Parallel worker task $c/$totalTasks (workers: $workerCount, threads: $codecThreadCount)"))
                 }
             }
             jobs.joinAll()
@@ -260,10 +377,10 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
             codecVersion = NativeBenchmark.nativeGetVersion(codec.id),
             mode = BenchmarkMode.PARALLEL_DECODING,
             outputTarget = OutputTarget.NATIVE_BUFFER,
-            imageName = imageFile.name,
+            imageName = targetFile.name,
             width = 1600,
             height = 2400,
-            sourceBytes = imageFile.length(),
+            sourceBytes = targetFile.length(),
             encodedBytes = inBytes.size.toLong(),
             threadCount = codecThreadCount,
             rawSamples = samples.toList(),
@@ -271,7 +388,7 @@ class BenchmarkRunner(private val datasetManager: DatasetManager) {
             peakRssKb = mem[1],
             heapKb = mem[2]
         )
-        onProgress(BenchmarkProgress.Completed(result))
+        sendProgress(onProgress, BenchmarkProgress.Completed(result))
         return@withContext result
     }
 }

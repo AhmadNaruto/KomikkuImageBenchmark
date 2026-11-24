@@ -37,6 +37,55 @@ class DatasetManager(private val context: Context) {
         File(datasetDir, "results").apply { mkdirs() }
     }
 
+    /**
+     * Retrieves an existing encoded image or encodes the master image into the target format.
+     */
+    fun getOrEncodeSample(
+        masterPng: File,
+        codec: Codec,
+        lossless: Boolean = false,
+        quality: Int = 85
+    ): File {
+        val ext = when (codec) {
+            Codec.WEBP -> "webp"
+            Codec.JXL -> "jxl"
+            Codec.AVIF -> "avif"
+        }
+        val encodedFile = File(encodedDir, "${masterPng.nameWithoutExtension}_${codec.name.lowercase()}.$ext")
+        if (encodedFile.exists() && encodedFile.length() > 0) {
+            return encodedFile
+        }
+
+        if (!masterPng.exists()) {
+            generateMangaPattern(masterPng.nameWithoutExtension, 1600, 2400, "bw")
+        }
+
+        val bitmap = BitmapFactory.decodeFile(masterPng.absolutePath)
+            ?: throw IllegalStateException("Failed to decode master image: ${masterPng.name}")
+
+        try {
+            val effort = when (codec) {
+                Codec.JXL -> 7
+                Codec.AVIF -> 4
+                Codec.WEBP -> 4
+            }
+            val encodedBytes = NativeBenchmark.nativeEncodeFromBitmap(
+                codecId = codec.id,
+                bitmap = bitmap,
+                lossless = lossless,
+                quality = quality,
+                effort = effort,
+                threadCount = 2,
+                outTiming = null
+            ) ?: throw IllegalStateException("Failed to encode master image to ${codec.label}: ${NativeBenchmark.nativeGetLastError()}")
+
+            encodedFile.writeBytes(encodedBytes)
+            return encodedFile
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     fun listMasterImages(): List<ImageMetadata> {
         val files = mastersDir.listFiles { f ->
             f.extension.lowercase() in listOf("png", "webp", "jxl", "avif")

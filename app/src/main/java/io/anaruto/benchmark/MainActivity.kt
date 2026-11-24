@@ -8,8 +8,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.tabs.TabLayout
 import io.anaruto.benchmark.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -87,9 +89,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkOrInitDataset() {
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.Default) {
             val sample = datasetManager.generateMangaPattern("manga_page_001_1600x2400", 1600, 2400, "bw")
-            logConsole("Initialized sample dataset image: ${sample.name} (${sample.length() / 1024} KB)")
+            withContext(Dispatchers.Main) {
+                logConsole("Initialized sample dataset master: ${sample.name} (${sample.length() / 1024} KB)")
+                binding.tvStatus.text = "Pre-encoding benchmark bitstreams..."
+            }
+            for (c in listOf(Codec.WEBP, Codec.JXL, Codec.AVIF)) {
+                try {
+                    val enc = datasetManager.getOrEncodeSample(sample, c)
+                    withContext(Dispatchers.Main) {
+                        logConsole("✓ Prepared ${c.label} bitstream: ${enc.name} (${enc.length() / 1024} KB)")
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        logConsole("Notice: ${c.label} pre-encoding deferred: ${e.message}")
+                    }
+                }
+            }
+            withContext(Dispatchers.Main) {
+                binding.tvStatus.text = "Ready. Select Codec and click 'Run Benchmark'."
+            }
         }
     }
 
@@ -119,11 +139,13 @@ class MainActivity : AppCompatActivity() {
     private fun showDatasetManager() {
         lifecycleScope.launch {
             binding.tvStatus.text = "Generating resolution test suite..."
-            datasetManager.generateMangaPattern("manga_bw_1600x2400", 1600, 2400, "bw")
-            datasetManager.generateMangaPattern("manga_tone_2500x3600", 2500, 3600, "screentone")
-            datasetManager.generateMangaPattern("manga_color_4000x6000", 4000, 6000, "color")
+            withContext(Dispatchers.IO) {
+                datasetManager.generateMangaPattern("manga_bw_1600x2400", 1600, 2400, "bw")
+                datasetManager.generateMangaPattern("manga_tone_2500x3600", 2500, 3600, "screentone")
+                datasetManager.generateMangaPattern("manga_color_4000x6000", 4000, 6000, "color")
+            }
 
-            val list = datasetManager.listMasterImages()
+            val list = withContext(Dispatchers.IO) { datasetManager.listMasterImages() }
             val sb = StringBuilder()
             sb.appendLine("\n============== DATASET CATALOG ==============")
             sb.appendLine("Total master images: ${list.size}")
@@ -176,41 +198,81 @@ class MainActivity : AppCompatActivity() {
             else -> 1
         }
 
-        val config = DecoderBenchmarkConfig(
-            codec = selectedCodec,
-            outputTarget = target,
-            threadCount = threads,
-            warmupIterations = 5,
-            testIterations = 20
-        )
-
         val sampleFile = File(datasetManager.mastersDir, "manga_page_001_1600x2400.png")
 
         binding.btnRunBenchmark.text = "Stop Benchmark"
         binding.progressBar.visibility = View.VISIBLE
         binding.progressBar.progress = 0
-        logConsole("\n--- Starting Benchmark: ${selectedCodec.label} | $target | $threads threads ---")
 
-        benchmarkJob = lifecycleScope.launch {
-            runner.runDecoderBenchmark(config, sampleFile) { progress ->
-                when (progress) {
-                    is BenchmarkRunner.BenchmarkProgress.Running -> {
-                        binding.tvStatus.text = progress.message
-                        binding.progressBar.max = progress.totalIterations
-                        binding.progressBar.progress = progress.currentIteration
+        val isEncoderMode = (binding.tabLayout.selectedTabPosition == 2)
+
+        if (isEncoderMode) {
+            val encConfig = EncoderBenchmarkConfig(
+                codec = selectedCodec,
+                lossless = true,
+                quality = 90,
+                effort = if (selectedCodec == Codec.JXL) 7 else 4,
+                threadCount = threads,
+                warmupIterations = 3,
+                testIterations = 10
+            )
+            logConsole("\n--- Starting Encoder Benchmark: ${selectedCodec.label} | $threads threads ---")
+
+            benchmarkJob = lifecycleScope.launch {
+                runner.runEncoderBenchmark(encConfig, sampleFile) { progress ->
+                    when (progress) {
+                        is BenchmarkRunner.BenchmarkProgress.Running -> {
+                            binding.tvStatus.text = progress.message
+                            binding.progressBar.max = progress.totalIterations
+                            binding.progressBar.progress = progress.currentIteration
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Completed -> {
+                            resultsList.add(progress.result)
+                            displayResultSummary(progress.result)
+                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.progressBar.visibility = View.GONE
+                            binding.tvStatus.text = "Encoder Benchmark Completed"
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Error -> {
+                            logConsole("ERROR: ${progress.message}")
+                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.progressBar.visibility = View.GONE
+                            binding.tvStatus.text = "Error: ${progress.message}"
+                        }
                     }
-                    is BenchmarkRunner.BenchmarkProgress.Completed -> {
-                        resultsList.add(progress.result)
-                        displayResultSummary(progress.result)
-                        binding.btnRunBenchmark.text = "Run Benchmark"
-                        binding.progressBar.visibility = View.GONE
-                        binding.tvStatus.text = "Benchmark Completed"
-                    }
-                    is BenchmarkRunner.BenchmarkProgress.Error -> {
-                        logConsole("ERROR: ${progress.message}")
-                        binding.btnRunBenchmark.text = "Run Benchmark"
-                        binding.progressBar.visibility = View.GONE
-                        binding.tvStatus.text = "Error: ${progress.message}"
+                }
+            }
+        } else {
+            val config = DecoderBenchmarkConfig(
+                codec = selectedCodec,
+                outputTarget = target,
+                threadCount = threads,
+                warmupIterations = 5,
+                testIterations = 20
+            )
+            logConsole("\n--- Starting Decoder Benchmark: ${selectedCodec.label} | $target | $threads threads ---")
+
+            benchmarkJob = lifecycleScope.launch {
+                runner.runDecoderBenchmark(config, sampleFile) { progress ->
+                    when (progress) {
+                        is BenchmarkRunner.BenchmarkProgress.Running -> {
+                            binding.tvStatus.text = progress.message
+                            binding.progressBar.max = progress.totalIterations
+                            binding.progressBar.progress = progress.currentIteration
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Completed -> {
+                            resultsList.add(progress.result)
+                            displayResultSummary(progress.result)
+                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.progressBar.visibility = View.GONE
+                            binding.tvStatus.text = "Decoder Benchmark Completed"
+                        }
+                        is BenchmarkRunner.BenchmarkProgress.Error -> {
+                            logConsole("ERROR: ${progress.message}")
+                            binding.btnRunBenchmark.text = "Run Benchmark"
+                            binding.progressBar.visibility = View.GONE
+                            binding.tvStatus.text = "Error: ${progress.message}"
+                        }
                     }
                 }
             }
