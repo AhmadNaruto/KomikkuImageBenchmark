@@ -4,11 +4,14 @@
 
 #include <jxl/decode.h>
 #include <jxl/decode_cxx.h>
+#include <jxl/color_encoding.h>
+#include <jxl/encode.h>
 #include <jxl/thread_parallel_runner.h>
 #include <jxl/thread_parallel_runner_cxx.h>
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace komikku {
 
@@ -161,7 +164,12 @@ public:
                 }
             } else if (status == JXL_DEC_COLOR_ENCODING) {
                 // Set default sRGB color encoding
-                JxlColorEncoding color_encoding;
+                JxlColorEncoding color_encoding = {};
+                color_encoding.color_space = JXL_COLOR_SPACE_RGB;
+                color_encoding.white_point = JXL_WHITE_POINT_D65;
+                color_encoding.primaries = JXL_PRIMARIES_SRGB;
+                color_encoding.transfer_function = JXL_TRANSFER_FUNCTION_SRGB;
+                color_encoding.rendering_intent = JXL_RENDERING_INTENT_PERCEPTUAL;
                 JxlColorEncodingSetToSRGB(&color_encoding, /*is_gray=*/JXL_FALSE);
                 JxlDecoderSetPreferredColorProfile(dec.get(), &color_encoding);
             } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {

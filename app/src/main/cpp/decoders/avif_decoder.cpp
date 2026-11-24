@@ -5,6 +5,7 @@
 #include <avif/avif.h>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace komikku {
 
